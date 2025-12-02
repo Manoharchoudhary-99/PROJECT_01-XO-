@@ -1,6 +1,29 @@
 # Overview
 
-A full-stack web application built with React, Express, and TypeScript featuring a tic-tac-toe game. The project uses modern web development tools including Vite for frontend bundling, shadcn/ui for component library, TailwindCSS for styling, and Drizzle ORM for database operations. The application is structured as a monorepo with shared TypeScript schemas and includes comprehensive UI components for building interactive web applications.
+A full-stack web application built with React, Express, and TypeScript featuring a tic-tac-toe game with AI opponent. The project uses modern web development tools including Vite for frontend bundling, shadcn/ui for component library, TailwindCSS for styling, and Drizzle ORM for database operations. The application is structured as a monorepo with shared TypeScript schemas and includes comprehensive UI components for building interactive web applications.
+
+## Game Features (Updated December 2025)
+
+### Game Modes
+- **Single Player**: Play against AI with three difficulty levels
+  - Easy: Random move selection
+  - Medium: Heuristic (win/block priority, center/corners preference)
+  - Hard: Minimax algorithm with alpha-beta pruning
+- **Local Multiplayer**: Two players take turns on the same device
+
+### UI/UX
+- Mobile-first responsive design optimized for Android
+- Dark theme with gradient backgrounds and glow effects
+- Touch-friendly buttons with 52px minimum height
+- Animated win detection with highlighted winning cells
+- Score tracking (X wins, O wins, draws)
+- Win/Draw celebration modal with Menu and Play Again options
+
+### Technical Implementation
+- Race condition handling for AI moves with gameIdRef tracking
+- Modal timeout cleanup on navigation/reset
+- Functional state updates to prevent stale closures
+- Safe area support for mobile notches
 
 # User Preferences
 

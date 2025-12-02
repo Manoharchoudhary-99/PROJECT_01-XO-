@@ -54,11 +54,196 @@
   }
 
   body {
-    @apply font-sans antialiased bg-background text-foreground;
+    @apply font-sans antialiased;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    overscroll-behavior: none;
   }
 }
 
-/* Custom animations for the tic-tac-toe game */
+/* Game Background */
+.game-background {
+  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Game Card */
+.game-card {
+  background: rgba(30, 41, 59, 0.8);
+  backdrop-filter: blur(12px);
+  border-radius: 24px;
+}
+
+/* Game Header */
+.game-header {
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(100, 116, 139, 0.2);
+}
+
+/* Game Logo */
+.game-logo {
+  font-size: 3rem;
+  font-weight: 800;
+  letter-spacing: -0.05em;
+}
+
+/* Game Grid */
+.game-board-container {
+  background: rgba(30, 41, 59, 0.6);
+  backdrop-filter: blur(8px);
+  border-radius: 20px;
+  padding: 16px;
+}
+
+.game-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  aspect-ratio: 1;
+}
+
+.game-cell {
+  aspect-ratio: 1;
+  background: linear-gradient(145deg, #1e293b, #0f172a);
+  border: 2px solid rgba(100, 116, 139, 0.3);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(2rem, 10vw, 4rem);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 
+              inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  min-height: 80px;
+  min-width: 80px;
+}
+
+.game-cell:not(.filled):not(.disabled):hover {
+  background: linear-gradient(145deg, #334155, #1e293b);
+  border-color: rgba(59, 130, 246, 0.5);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 12px -2px rgba(0, 0, 0, 0.4);
+}
+
+.game-cell:not(.filled):not(.disabled):active {
+  transform: scale(0.95);
+}
+
+.game-cell.filled {
+  cursor: default;
+}
+
+.game-cell.disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.game-cell.winning {
+  background: linear-gradient(145deg, #16a34a, #15803d);
+  border-color: #22c55e;
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
+
+.cell-content {
+  animation: pop-in 0.25s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.x-mark {
+  color: #3b82f6;
+  text-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+}
+
+.o-mark {
+  color: #f43f5e;
+  text-shadow: 0 0 20px rgba(244, 63, 94, 0.5);
+}
+
+/* Score Board */
+.score-board {
+  display: flex;
+  justify-content: space-around;
+  background: rgba(30, 41, 59, 0.6);
+  backdrop-filter: blur(8px);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.score-item {
+  text-align: center;
+}
+
+.score-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+.score-label {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+/* Mobile Button */
+.mobile-button {
+  min-height: 52px;
+  border-radius: 14px;
+  font-size: 1rem;
+  touch-action: manipulation;
+  transition: all 0.2s ease;
+}
+
+.mobile-button:active {
+  transform: scale(0.97);
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 50;
+}
+
+.modal-content {
+  background: linear-gradient(145deg, #1e293b, #0f172a);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-radius: 24px;
+  padding: 32px 24px;
+  max-width: 320px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.modal-icon {
+  font-size: 4rem;
+  margin-bottom: 16px;
+}
+
+.modal-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: white;
+  margin-bottom: 8px;
+}
+
+.modal-subtitle {
+  color: #94a3b8;
+  margin-bottom: 24px;
+}
+
+/* Animations */
 @keyframes bounceIn {
   0% { transform: scale(0.3); opacity: 0; }
   50% { transform: scale(1.05); opacity: 0.8; }
@@ -66,16 +251,81 @@
   100% { transform: scale(1); opacity: 1; }
 }
 
+@keyframes pop-in {
+  0% { transform: scale(0); opacity: 0; }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(34, 197, 94, 0.4); }
+  50% { box-shadow: 0 0 40px rgba(34, 197, 94, 0.8); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes thinking-dots {
+  0%, 20% { content: '.'; }
+  40% { content: '..'; }
+  60%, 100% { content: '...'; }
+}
+
 .animate-bounce-in {
   animation: bounceIn 0.5s ease-out;
 }
 
-.cell-hover:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out;
 }
 
-.win-highlight {
-  background: linear-gradient(135deg, hsl(142, 71%, 45%), hsl(142, 84%, 40%));
-  animation: pulse 1s infinite;
+.animate-slide-up {
+  animation: slide-up 0.5s ease-out;
+}
+
+.ai-thinking-dots::after {
+  content: '';
+  animation: thinking-dots 1.5s infinite steps(1);
+}
+
+/* Safe area for mobile devices */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .game-background {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  .game-header {
+    padding-top: max(16px, env(safe-area-inset-top));
+  }
+}
+
+/* Responsive adjustments */
+@media (max-width: 380px) {
+  .game-cell {
+    min-height: 70px;
+    min-width: 70px;
+    font-size: 2rem;
+  }
+  
+  .game-grid {
+    gap: 8px;
+  }
+  
+  .game-board-container {
+    padding: 12px;
+  }
+}
+
+@media (min-width: 400px) {
+  .game-cell {
+    min-height: 90px;
+    min-width: 90px;
+  }
 }

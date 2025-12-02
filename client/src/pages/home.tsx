@@ -1,18 +1,21 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, Bot, Users, RotateCcw, Smartphone, Zap, Brain, Sparkles } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { ArrowLeft, Bot, Users, RotateCcw, Smartphone, Zap, Brain, Sparkles, Globe, Copy, Check, Wifi, WifiOff } from "lucide-react";
+import { io, Socket } from "socket.io-client";
+import type { GameRoom } from "@shared/schema";
 
 type Player = 'X' | 'O';
 type BoardState = (Player | null)[];
-type GameStatus = 'playing' | 'won' | 'draw';
-type GameMode = 'menu' | 'single' | 'multiplayer';
+type LocalGameStatus = 'playing' | 'won' | 'draw';
+type GameMode = 'menu' | 'single' | 'multiplayer' | 'online-lobby' | 'online-game';
 type Difficulty = 'easy' | 'medium' | 'hard';
 
 interface GameState {
   board: BoardState;
   currentPlayer: Player;
-  status: GameStatus;
+  status: LocalGameStatus;
   winner: Player | null;
   winningCells: number[];
   scores: {
@@ -20,6 +23,18 @@ interface GameState {
     O: number;
     draws: number;
   };
+}
+
+interface OnlineState {
+  socket: Socket | null;
+  roomCode: string;
+  playerId: string;
+  playerName: string;
+  role: 'host' | 'guest' | null;
+  opponentName: string;
+  isConnected: boolean;
+  isWaiting: boolean;
+  room: GameRoom | null;
 }
 
 const WINNING_COMBINATIONS = [
@@ -146,9 +161,80 @@ export default function Home() {
   const [showWinModal, setShowWinModal] = useState(false);
   const [isAIThinking, setIsAIThinking] = useState(false);
   
+  const [onlineState, setOnlineState] = useState<OnlineState>({
+    socket: null,
+    roomCode: '',
+    playerId: '',
+    playerName: '',
+    role: null,
+    opponentName: '',
+    isConnected: false,
+    isWaiting: false,
+    room: null
+  });
+  const [joinCode, setJoinCode] = useState('');
+  const [playerNameInput, setPlayerNameInput] = useState('');
+  const [onlineError, setOnlineError] = useState('');
+  const [copied, setCopied] = useState(false);
+  
   const aiTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const modalTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const gameIdRef = useRef(0);
+
+  useEffect(() => {
+    if (onlineState.socket) {
+      const socket = onlineState.socket;
+
+      socket.on("room_state", ({ room }: { room: GameRoom }) => {
+        setOnlineState(prev => ({ ...prev, room, isWaiting: room.status === 'waiting' }));
+      });
+
+      socket.on("guest_joined", ({ room }: { room: GameRoom }) => {
+        setOnlineState(prev => ({ 
+          ...prev, 
+          room, 
+          isWaiting: false,
+          opponentName: room.guestName || ''
+        }));
+        setGameMode('online-game');
+      });
+
+      socket.on("game_update", ({ room }: { room: GameRoom }) => {
+        setOnlineState(prev => ({ ...prev, room }));
+        
+        if (room.status === 'won' || room.status === 'draw') {
+          setTimeout(() => setShowWinModal(true), 300);
+        }
+      });
+
+      socket.on("player_connected", () => {
+        setOnlineState(prev => ({ ...prev, isConnected: true }));
+      });
+
+      socket.on("opponent_left", () => {
+        setOnlineError("Your opponent left the game");
+        disconnectOnline();
+      });
+
+      socket.on("opponent_disconnected", () => {
+        setOnlineState(prev => ({ ...prev, isConnected: false }));
+      });
+
+      socket.on("error", ({ message }: { message: string }) => {
+        setOnlineError(message);
+      });
+
+      return () => {
+        socket.off("room_state");
+        socket.off("guest_joined");
+        socket.off("game_update");
+        socket.off("player_connected");
+        socket.off("opponent_left");
+        socket.off("opponent_disconnected");
+        socket.off("error");
+      };
+    }
+  }, [onlineState.socket]);
 
   const cancelPendingActions = useCallback(() => {
     if (aiTimeoutRef.current) {
@@ -161,6 +247,156 @@ export default function Home() {
     }
     setIsAIThinking(false);
   }, []);
+
+  const disconnectOnline = useCallback(() => {
+    if (onlineState.socket) {
+      onlineState.socket.emit("leave_room");
+      onlineState.socket.disconnect();
+    }
+    setOnlineState({
+      socket: null,
+      roomCode: '',
+      playerId: '',
+      playerName: '',
+      role: null,
+      opponentName: '',
+      isConnected: false,
+      isWaiting: false,
+      room: null
+    });
+    setGameMode('menu');
+    setShowWinModal(false);
+  }, [onlineState.socket]);
+
+  const createOnlineRoom = async () => {
+    if (!playerNameInput.trim()) {
+      setOnlineError("Please enter your name");
+      return;
+    }
+
+    setOnlineError('');
+    
+    try {
+      const response = await fetch('/api/rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerName: playerNameInput.trim() })
+      });
+
+      const data = await response.json();
+      
+      if (!data.success) {
+        setOnlineError(data.error || "Failed to create room");
+        return;
+      }
+
+      const socket = io();
+      socket.on("connect", () => {
+        socket.emit("join_room", { 
+          roomCode: data.room.roomCode, 
+          playerId: data.playerId 
+        });
+      });
+
+      setOnlineState({
+        socket,
+        roomCode: data.room.roomCode,
+        playerId: data.playerId,
+        playerName: playerNameInput.trim(),
+        role: 'host',
+        opponentName: '',
+        isConnected: true,
+        isWaiting: true,
+        room: data.room
+      });
+
+      setGameMode('online-game');
+    } catch (error) {
+      setOnlineError("Failed to connect to server");
+    }
+  };
+
+  const joinOnlineRoom = async () => {
+    if (!playerNameInput.trim()) {
+      setOnlineError("Please enter your name");
+      return;
+    }
+    if (!joinCode.trim() || joinCode.length !== 6) {
+      setOnlineError("Please enter a valid 6-character room code");
+      return;
+    }
+
+    setOnlineError('');
+
+    try {
+      const response = await fetch(`/api/rooms/${joinCode.toUpperCase()}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerName: playerNameInput.trim() })
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        setOnlineError(data.error || "Failed to join room");
+        return;
+      }
+
+      const socket = io();
+      socket.on("connect", () => {
+        socket.emit("join_room", {
+          roomCode: data.room.roomCode,
+          playerId: data.playerId
+        });
+      });
+
+      setOnlineState({
+        socket,
+        roomCode: data.room.roomCode,
+        playerId: data.playerId,
+        playerName: playerNameInput.trim(),
+        role: 'guest',
+        opponentName: data.room.hostName,
+        isConnected: true,
+        isWaiting: false,
+        room: data.room
+      });
+
+      setGameMode('online-game');
+    } catch (error) {
+      setOnlineError("Failed to connect to server");
+    }
+  };
+
+  const handleOnlineMove = (index: number) => {
+    if (!onlineState.socket || !onlineState.room) return;
+    
+    const room = onlineState.room;
+    if (room.status !== 'playing') return;
+    
+    const myMark = onlineState.role === 'host' ? 'X' : 'O';
+    if (room.currentPlayer !== myMark) return;
+    if (room.board[index] !== null) return;
+
+    onlineState.socket.emit("make_move", { index });
+  };
+
+  const requestRematch = () => {
+    if (onlineState.socket) {
+      onlineState.socket.emit("request_rematch");
+      setShowWinModal(false);
+    }
+  };
+
+  const copyRoomCode = async () => {
+    try {
+      await navigator.clipboard.writeText(onlineState.roomCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy");
+    }
+  };
 
   const makeAIMove = useCallback(() => {
     setIsAIThinking(true);
@@ -189,7 +425,7 @@ export default function Home() {
         const { winner, cells } = checkWinnerWithCells(newBoard);
         const isDraw = checkDraw(newBoard);
 
-        let newStatus: GameStatus = 'playing';
+        let newStatus: LocalGameStatus = 'playing';
         let newScores = { ...prevState.scores };
 
         if (winner) {
@@ -238,9 +474,14 @@ export default function Home() {
     if (gameMode === 'single' && gameState.currentPlayer === 'O' && gameState.status === 'playing' && !isAIThinking) {
       makeAIMove();
     }
-  }, [gameState.currentPlayer, gameState.status, gameMode, makeAIMove]);
+  }, [gameState.currentPlayer, gameState.status, gameMode, makeAIMove, isAIThinking]);
 
   const handleCellClick = (index: number) => {
+    if (gameMode === 'online-game') {
+      handleOnlineMove(index);
+      return;
+    }
+
     if (gameState.board[index] || gameState.status !== 'playing' || isAIThinking) {
       return;
     }
@@ -256,7 +497,7 @@ export default function Home() {
     const { winner, cells } = checkWinnerWithCells(newBoard);
     const isDraw = checkDraw(newBoard);
 
-    let newStatus: GameStatus = 'playing';
+    let newStatus: LocalGameStatus = 'playing';
     let newScores = { ...gameState.scores };
 
     if (winner) {
@@ -317,6 +558,9 @@ export default function Home() {
   const goToMenu = useCallback(() => {
     cancelPendingActions();
     gameIdRef.current++;
+    if (gameMode === 'online-game' || gameMode === 'online-lobby') {
+      disconnectOnline();
+    }
     setGameMode('menu');
     setGameState({
       board: Array(9).fill(null),
@@ -327,7 +571,8 @@ export default function Home() {
       scores: { X: 0, O: 0, draws: 0 }
     });
     setShowWinModal(false);
-  }, [cancelPendingActions]);
+    setOnlineError('');
+  }, [cancelPendingActions, disconnectOnline, gameMode]);
 
   const startGame = useCallback((mode: 'single' | 'multiplayer', diff?: Difficulty) => {
     cancelPendingActions();
@@ -347,7 +592,11 @@ export default function Home() {
 
   const closeWinModal = () => {
     setShowWinModal(false);
-    resetGame();
+    if (gameMode === 'online-game') {
+      requestRematch();
+    } else {
+      resetGame();
+    }
   };
 
   const getDifficultyIcon = (diff: Difficulty) => {
@@ -367,6 +616,23 @@ export default function Home() {
   };
 
   const getGameStatusText = () => {
+    if (gameMode === 'online-game' && onlineState.room) {
+      const room = onlineState.room;
+      if (onlineState.isWaiting) {
+        return "Waiting for opponent...";
+      }
+      if (room.status === 'won') {
+        const myMark = onlineState.role === 'host' ? 'X' : 'O';
+        return room.winner === myMark ? 'You Win!' : `${onlineState.opponentName} Wins!`;
+      }
+      if (room.status === 'draw') {
+        return "It's a Draw!";
+      }
+      const myMark = onlineState.role === 'host' ? 'X' : 'O';
+      const isMyTurn = room.currentPlayer === myMark;
+      return isMyTurn ? "Your turn" : `${onlineState.opponentName}'s turn`;
+    }
+
     if (gameState.status === 'won') {
       if (gameMode === 'single') {
         return gameState.winner === 'X' ? 'You Win!' : 'AI Wins!';
@@ -393,6 +659,27 @@ export default function Home() {
       );
     }
   };
+
+  const getOnlineWinMessage = () => {
+    if (!onlineState.room) return '';
+    const myMark = onlineState.role === 'host' ? 'X' : 'O';
+    if (onlineState.room.status === 'won') {
+      return onlineState.room.winner === myMark ? 'You Win!' : `${onlineState.opponentName} Wins!`;
+    }
+    return "It's a Draw!";
+  };
+
+  const currentBoard = gameMode === 'online-game' && onlineState.room 
+    ? onlineState.room.board 
+    : gameState.board;
+  
+  const currentWinningCells = gameMode === 'online-game' && onlineState.room
+    ? onlineState.room.winningCells
+    : gameState.winningCells;
+
+  const isMyTurnOnline = gameMode === 'online-game' && onlineState.room && !onlineState.isWaiting
+    ? onlineState.room.currentPlayer === (onlineState.role === 'host' ? 'X' : 'O')
+    : true;
 
   if (gameMode === 'menu') {
     return (
@@ -430,7 +717,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="border-t border-slate-700 pt-4">
+              <div className="border-t border-slate-700 pt-4 space-y-3">
                 <Button
                   onClick={() => startGame('multiplayer')}
                   className="w-full mobile-button bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white font-semibold flex items-center justify-center gap-3"
@@ -440,8 +727,147 @@ export default function Home() {
                   <span>Local Multiplayer</span>
                   <Smartphone className="w-4 h-4 opacity-60" />
                 </Button>
-                <p className="text-slate-500 text-xs text-center mt-2">Play with a friend on the same device</p>
+
+                <Button
+                  onClick={() => setGameMode('online-lobby')}
+                  className="w-full mobile-button bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-semibold flex items-center justify-center gap-3"
+                  data-testid="button-online"
+                >
+                  <Globe className="w-5 h-5" />
+                  <span>Play Online</span>
+                  <Wifi className="w-4 h-4 opacity-60" />
+                </Button>
+                <p className="text-slate-500 text-xs text-center">Play with a friend remotely</p>
               </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (gameMode === 'online-lobby') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 game-background">
+        <div className="w-full max-w-sm">
+          <div className="text-center mb-6 animate-fade-in">
+            <h1 className="text-2xl font-bold text-white mb-2">Play Online</h1>
+            <p className="text-slate-400 text-sm">Create a room or join a friend</p>
+          </div>
+
+          <Card className="game-card border-0 shadow-2xl animate-slide-up" data-testid="online-lobby-card">
+            <CardContent className="p-6 space-y-6">
+              <div className="space-y-3">
+                <label className="text-white font-medium text-sm">Your Name</label>
+                <Input
+                  value={playerNameInput}
+                  onChange={(e) => setPlayerNameInput(e.target.value)}
+                  placeholder="Enter your name"
+                  maxLength={20}
+                  className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500"
+                  data-testid="input-player-name"
+                />
+              </div>
+
+              {onlineError && (
+                <div className="text-red-400 text-sm text-center bg-red-900/20 rounded-lg p-2" data-testid="text-online-error">
+                  {onlineError}
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <Button
+                  onClick={createOnlineRoom}
+                  className="w-full mobile-button bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white font-semibold"
+                  data-testid="button-create-room"
+                >
+                  Create Room
+                </Button>
+              </div>
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-slate-700" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-slate-800 px-2 text-slate-500">Or join a room</span>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <Input
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase().slice(0, 6))}
+                  placeholder="Enter room code"
+                  maxLength={6}
+                  className="bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 text-center text-xl tracking-widest font-mono uppercase"
+                  data-testid="input-room-code"
+                />
+                <Button
+                  onClick={joinOnlineRoom}
+                  className="w-full mobile-button bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold"
+                  data-testid="button-join-room"
+                >
+                  Join Room
+                </Button>
+              </div>
+
+              <Button
+                onClick={goToMenu}
+                variant="ghost"
+                className="w-full text-slate-400 hover:text-white"
+                data-testid="button-back-from-lobby"
+              >
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Menu
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (gameMode === 'online-game' && onlineState.isWaiting) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 game-background">
+        <div className="w-full max-w-sm">
+          <Card className="game-card border-0 shadow-2xl animate-slide-up" data-testid="waiting-room-card">
+            <CardContent className="p-6 text-center space-y-6">
+              <div className="animate-pulse">
+                <div className="w-16 h-16 mx-auto bg-gradient-to-r from-cyan-500 to-blue-600 rounded-full flex items-center justify-center mb-4">
+                  <Wifi className="w-8 h-8 text-white" />
+                </div>
+                <h2 className="text-xl font-bold text-white">Waiting for opponent...</h2>
+                <p className="text-slate-400 text-sm mt-2">Share this code with your friend</p>
+              </div>
+
+              <div className="bg-slate-800 rounded-xl p-4">
+                <p className="text-slate-400 text-xs mb-2">Room Code</p>
+                <div className="flex items-center justify-center gap-3">
+                  <span className="text-3xl font-mono font-bold text-white tracking-widest" data-testid="text-room-code">
+                    {onlineState.roomCode}
+                  </span>
+                  <Button
+                    onClick={copyRoomCode}
+                    variant="ghost"
+                    size="sm"
+                    className="text-slate-400 hover:text-white"
+                    data-testid="button-copy-code"
+                  >
+                    {copied ? <Check className="w-5 h-5 text-green-400" /> : <Copy className="w-5 h-5" />}
+                  </Button>
+                </div>
+              </div>
+
+              <Button
+                onClick={disconnectOnline}
+                variant="ghost"
+                className="text-slate-400 hover:text-white"
+                data-testid="button-cancel-waiting"
+              >
+                Cancel
+              </Button>
             </CardContent>
           </Card>
         </div>
@@ -467,6 +893,11 @@ export default function Home() {
               {getDifficultyIcon(difficulty)}
               {difficulty.charAt(0).toUpperCase() + difficulty.slice(1)}
             </span>
+          ) : gameMode === 'online-game' ? (
+            <span className="px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-cyan-500 to-blue-600 text-white flex items-center gap-1">
+              <Globe className="w-3 h-3" />
+              vs {onlineState.opponentName}
+            </span>
           ) : (
             <span className="px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-violet-500 to-purple-600 text-white flex items-center gap-1">
               <Users className="w-3 h-3" />
@@ -475,14 +906,19 @@ export default function Home() {
           )}
         </div>
 
-        <Button
-          onClick={resetScores}
-          variant="ghost"
-          className="text-slate-400 hover:text-white hover:bg-slate-800 p-2"
-          data-testid="button-reset-scores"
-        >
-          <RotateCcw className="w-5 h-5" />
-        </Button>
+        {gameMode !== 'online-game' && (
+          <Button
+            onClick={resetScores}
+            variant="ghost"
+            className="text-slate-400 hover:text-white hover:bg-slate-800 p-2"
+            data-testid="button-reset-scores"
+          >
+            <RotateCcw className="w-5 h-5" />
+          </Button>
+        )}
+        {gameMode === 'online-game' && (
+          <div className="w-9" />
+        )}
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center p-4">
@@ -495,12 +931,16 @@ export default function Home() {
 
           <div className="game-board-container mb-6">
             <div className="game-grid">
-              {gameState.board.map((cell, index) => (
+              {currentBoard.map((cell, index) => (
                 <button
                   key={index}
-                  className={`game-cell ${cell ? 'filled' : ''} ${gameState.winningCells.includes(index) ? 'winning' : ''} ${isAIThinking ? 'disabled' : ''}`}
+                  className={`game-cell ${cell ? 'filled' : ''} ${currentWinningCells.includes(index) ? 'winning' : ''} ${(isAIThinking || !isMyTurnOnline) ? 'disabled' : ''}`}
                   onClick={() => handleCellClick(index)}
-                  disabled={gameState.status !== 'playing' || cell !== null || isAIThinking}
+                  disabled={
+                    (gameMode === 'online-game' 
+                      ? (!isMyTurnOnline || cell !== null || (onlineState.room?.status !== 'playing'))
+                      : (gameState.status !== 'playing' || cell !== null || isAIThinking))
+                  }
                   data-testid={`cell-${index}`}
                 >
                   {cell && (
@@ -513,28 +953,50 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="score-board mb-6">
-            <div className="score-item">
-              <div className="score-value text-blue-400" data-testid="score-x">{gameState.scores.X}</div>
-              <div className="score-label">{gameMode === 'single' ? 'You (X)' : 'Player X'}</div>
-            </div>
-            <div className="score-item">
-              <div className="score-value text-slate-400" data-testid="score-draws">{gameState.scores.draws}</div>
-              <div className="score-label">Draws</div>
-            </div>
-            <div className="score-item">
-              <div className="score-value text-rose-400" data-testid="score-o">{gameState.scores.O}</div>
-              <div className="score-label">{gameMode === 'single' ? 'AI (O)' : 'Player O'}</div>
-            </div>
-          </div>
+          {gameMode !== 'online-game' && (
+            <>
+              <div className="score-board mb-6">
+                <div className="score-item">
+                  <div className="score-value text-blue-400" data-testid="score-x">{gameState.scores.X}</div>
+                  <div className="score-label">{gameMode === 'single' ? 'You (X)' : 'Player X'}</div>
+                </div>
+                <div className="score-item">
+                  <div className="score-value text-slate-400" data-testid="score-draws">{gameState.scores.draws}</div>
+                  <div className="score-label">Draws</div>
+                </div>
+                <div className="score-item">
+                  <div className="score-value text-rose-400" data-testid="score-o">{gameState.scores.O}</div>
+                  <div className="score-label">{gameMode === 'single' ? 'AI (O)' : 'Player O'}</div>
+                </div>
+              </div>
 
-          <Button
-            onClick={resetGame}
-            className="w-full mobile-button bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold"
-            data-testid="button-new-game"
-          >
-            New Game
-          </Button>
+              <Button
+                onClick={resetGame}
+                className="w-full mobile-button bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold"
+                data-testid="button-new-game"
+              >
+                New Game
+              </Button>
+            </>
+          )}
+
+          {gameMode === 'online-game' && (
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-2 text-slate-400 text-sm">
+                {onlineState.isConnected ? (
+                  <>
+                    <Wifi className="w-4 h-4 text-green-400" />
+                    <span>Connected</span>
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="w-4 h-4 text-yellow-400" />
+                    <span>Reconnecting...</span>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -542,24 +1004,36 @@ export default function Home() {
         <div className="modal-overlay" data-testid="modal-win">
           <div className="modal-content animate-bounce-in">
             <div className="modal-icon">
-              {gameState.status === 'won' ? (
-                gameMode === 'single' && gameState.winner === 'O' ? '🤖' : '🎉'
-              ) : '🤝'}
+              {gameMode === 'online-game' ? (
+                onlineState.room?.winner === (onlineState.role === 'host' ? 'X' : 'O') ? '🎉' : '😔'
+              ) : (
+                gameState.status === 'won' ? (
+                  gameMode === 'single' && gameState.winner === 'O' ? '🤖' : '🎉'
+                ) : '🤝'
+              )}
             </div>
             <h2 className="modal-title" data-testid="text-win-message">
-              {gameState.status === 'won' 
-                ? (gameMode === 'single' 
-                    ? (gameState.winner === 'X' ? 'You Win!' : 'AI Wins!') 
-                    : `Player ${gameState.winner} Wins!`)
-                : "It's a Draw!"
+              {gameMode === 'online-game' 
+                ? getOnlineWinMessage()
+                : (gameState.status === 'won' 
+                    ? (gameMode === 'single' 
+                        ? (gameState.winner === 'X' ? 'You Win!' : 'AI Wins!') 
+                        : `Player ${gameState.winner} Wins!`)
+                    : "It's a Draw!"
+                  )
               }
             </h2>
             <p className="modal-subtitle">
-              {gameState.status === 'won' 
-                ? (gameMode === 'single' && gameState.winner === 'O' 
-                    ? 'Better luck next time!' 
-                    : 'Congratulations!')
-                : 'Great game, well played!'
+              {gameMode === 'online-game'
+                ? (onlineState.room?.winner === (onlineState.role === 'host' ? 'X' : 'O')
+                    ? 'Congratulations!'
+                    : 'Better luck next time!')
+                : (gameState.status === 'won' 
+                    ? (gameMode === 'single' && gameState.winner === 'O' 
+                        ? 'Better luck next time!' 
+                        : 'Congratulations!')
+                    : 'Great game, well played!'
+                  )
               }
             </p>
             <div className="flex gap-3 w-full">

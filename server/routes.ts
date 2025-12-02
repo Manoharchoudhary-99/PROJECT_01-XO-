@@ -125,13 +125,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      currentRoom = roomCode.toUpperCase();
+      const roomId = roomCode.toUpperCase();
+      currentRoom = roomId;
       currentPlayerId = playerId;
-      socket.join(currentRoom);
+      socket.join(roomId);
 
       socket.emit("room_state", { room });
       
-      socket.to(currentRoom).emit("player_connected", { 
+      socket.to(roomId).emit("player_connected", { 
         playerId,
         isHost: playerId === room.hostId 
       });

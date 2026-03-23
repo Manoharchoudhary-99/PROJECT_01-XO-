@@ -4,7 +4,7 @@ A full-stack web application built with React, Express, and TypeScript featuring
 
 ## Game Features (Updated December 2025)
 
-### Game Modes
+## Game Modes
 - **Single Player**: Play against AI with three difficulty levels
   - Easy: Random move selection
   - Medium: Heuristic (win/block priority, center/corners preference)

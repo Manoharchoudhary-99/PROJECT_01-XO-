@@ -76,7 +76,7 @@ Preferred communication style: Simple, everyday language.
 - **Embla Carousel**: Carousel/slider components for interactive content
 
 ## Development Tools
-- **Replit Integration**: Custom Vite plugins for Replit development environment
+- **Integration**: Custom Vite plugins for development environment
 - **Runtime Error Handling**: Development error overlay for better debugging experience
 - **Code Generation**: Drizzle Kit for automated migration generation
 
